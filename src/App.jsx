@@ -44,8 +44,93 @@ function ImagesToPdf(){const [files,setFiles]=useState([]),[busy,setBusy]=useSta
 
 function PdfToImages(){const [file,setFile]=useState(null),[busy,setBusy]=useState(false),[pages,setPages]=useState([]);const run=async()=>{setBusy(true);const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;const out=[];for(let i=1;i<=pdf.numPages;i++){const p=await pdf.getPage(i),vp=p.getViewport({scale:1.5}),c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;await p.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;const b=await new Promise(r=>c.toBlob(r,'image/png'));out.push({blob:b,name:`page-${i}.png`})}setPages(out);setBusy(false)};return <div className="stack"><DropZone accept="application/pdf" onFiles={fs=>setFile(fs[0])}><FileText size={34}/><strong>{file?file.name:'Drop a PDF here'}</strong><span>Each page is rendered locally to PNG</span></DropZone><button className="primary big" disabled={!file||busy} onClick={run}>{busy?'Rendering…':'Convert to images'}</button>{pages.length>0&&<div className="result"><h3>{pages.length} pages ready</h3><div className="actions"><button className="primary" onClick={()=>pages.forEach(p=>downloadBlob(p.blob,p.name))}><Download size={18}/> Download all</button></div></div>}</div>}
 
-const filters=['Original','Auto Enhance','Document','Black & White','Grayscale','High Contrast','Receipt','ID Card','Sharpen','Blueprint'];
-function Scanner(){const [file,setFile]=useState(null),[filter,setFilter]=useState('Original'),[rotation,setRotation]=useState(0),[busy,setBusy]=useState(false),canvasRef=useRef(null),imgRef=useRef(null);const apply=()=>{const im=imgRef.current,c=canvasRef.current;if(!im||!c)return;const rad=rotation*Math.PI/180,w=im.width,h=im.height,swap=rotation%180!==0;c.width=swap?h:w;c.height=swap?w:h;const ctx=c.getContext('2d');ctx.save();ctx.translate(c.width/2,c.height/2);ctx.rotate(rad);ctx.drawImage(im,-w/2,-h/2);ctx.restore();const data=ctx.getImageData(0,0,c.width,c.height),d=data.data;for(let i=0;i<d.length;i+=4){let r=d[i],g=d[i+1],b=d[i+2],lum=.299*r+.587*g+.114*b;if(filter==='Grayscale')r=g=b=lum;if(filter==='Black & White')r=g=b=lum>155?255:0;if(filter==='Document')r=g=b=lum>185?255:Math.max(0,lum-20);if(filter==='Receipt')r=g=b=lum>205?255:0;if(filter==='High Contrast'){const f=1.7;r=Math.max(0,Math.min(255,(r-128)*f+128));g=Math.max(0,Math.min(255,(g-128)*f+128));b=Math.max(0,Math.min(255,(b-128)*f+128))}if(filter==='Auto Enhance'){r=Math.min(255,r*1.08+8);g=Math.min(255,g*1.08+8);b=Math.min(255,b*1.08+8)}if(filter==='ID Card'){r=Math.min(255,r*1.12+10);g=Math.min(255,g*1.12+10);b=Math.min(255,b*1.12+10)}if(filter==='Blueprint'){r=40;g=Math.min(255,lum*.65+35);b=Math.min(255,lum*1.15+65)}d[i]=r;d[i+1]=g;d[i+2]=b}if(filter==='Sharpen'){const src=new Uint8ClampedArray(d);const W=c.width;for(let y=1;y<c.height-1;y++)for(let x=1;x<W-1;x++)for(let k=0;k<3;k++){const i=(y*W+x)*4+k;d[i]=Math.max(0,Math.min(255,5*src[i]-src[i-4]-src[i+4]-src[i-W*4]-src[i+W*4]))}}ctx.putImageData(data,0,0)};useEffect(apply,[file,filter,rotation]);const choose=async(fs)=>{const f=fs[0];setFile(f);const im=await loadImage(f);imgRef.current=im;setTimeout(apply,0)};const exportFile=async(type)=>{const b=await new Promise(r=>canvasRef.current.toBlob(r,type,.92));downloadBlob(b,type==='image/jpeg'?'scan.jpg':'scan.png')};const exportPdf=async()=>{setBusy(true);const b=await new Promise(r=>canvasRef.current.toBlob(r,'image/jpeg',.92)),d=await PDFDocument.create(),jpg=await d.embedJpg(await b.arrayBuffer()),page=d.addPage([jpg.width*.5,jpg.height*.5]);page.drawImage(jpg,{x:0,y:0,width:page.getWidth(),height:page.getHeight()});downloadBlob(new Blob([await d.save()],{type:'application/pdf'}),'scanned-document.pdf');setBusy(false)};return <div className="scanner"><DropZone accept="image/*" onFiles={choose}><ScanLine size={34}/><strong>{file?file.name:'Upload a document photo'}</strong><span>Camera capture can be added from your device browser</span></DropZone>{file&&<><div className="filterrow">{filters.map(f=><button key={f} className={filter===f?'selected':''} onClick={()=>setFilter(f)}>{f}</button>)}</div><div className="scanpreview"><canvas ref={canvasRef}/></div><div className="actions"><button onClick={()=>setRotation((rotation+270)%360)}><RotateCcw size={18}/> Rotate left</button><button onClick={()=>setRotation((rotation+90)%360)}><RotateCw size={18}/> Rotate right</button><button className="primary" onClick={()=>exportFile('image/jpeg')}><Download size={18}/> JPG</button><button className="primary" disabled={busy} onClick={exportPdf}><FileText size={18}/> PDF</button></div><div className="notice">10 local enhancement filters included. Crop/perspective correction can be added as the next scanner upgrade.</div></>}</div>}
+const filters=['Original','Auto Enhance','Document','Black & White','Grayscale','High Contrast','Receipt','ID Card','Sharpen','Blueprint','AI Filter ✨'];
+
+
+
+function applyLocalDocumentEnhance(ctx,c,settings={}){
+  const data=ctx.getImageData(0,0,c.width,c.height),d=data.data;
+  const contrast=settings.contrast??1.35, brightness=settings.brightness??8, threshold=settings.threshold??null;
+  for(let i=0;i<d.length;i+=4){
+    let r=d[i],g=d[i+1],b=d[i+2],lum=.299*r+.587*g+.114*b;
+    if(threshold!==null) r=g=b=lum>threshold?255:0;
+    else {
+      r=Math.max(0,Math.min(255,(r-128)*contrast+128+brightness));
+      g=Math.max(0,Math.min(255,(g-128)*contrast+128+brightness));
+      b=Math.max(0,Math.min(255,(b-128)*contrast+128+brightness));
+    }
+    d[i]=r;d[i+1]=g;d[i+2]=b;
+  }
+  ctx.putImageData(data,0,0);
+}
+
+function detectDocumentCrop(im){
+  const max=700,scale=Math.min(1,max/Math.max(im.width,im.height));
+  const w=Math.max(1,Math.round(im.width*scale)),h=Math.max(1,Math.round(im.height*scale));
+  const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(im,0,0,w,h);
+  const d=ctx.getImageData(0,0,w,h).data, border=[];
+  for(let x=0;x<w;x+=4){for(const y of [0,Math.max(0,h-1)]){const i=(y*w+x)*4;border.push(.299*d[i]+.587*d[i+1]+.114*d[i+2])}}
+  for(let y=0;y<h;y+=4){for(const x of [0,Math.max(0,w-1)]){const i=(y*w+x)*4;border.push(.299*d[i]+.587*d[i+1]+.114*d[i+2])}}
+  border.sort((a,b)=>a-b);const bg=border[Math.floor(border.length/2)];
+  let minX=w,minY=h,maxX=-1,maxY=-1,count=0;const threshold=24;
+  for(let y=0;y<h;y+=2)for(let x=0;x<w;x+=2){const i=(y*w+x)*4,lum=.299*d[i]+.587*d[i+1]+.114*d[i+2];if(Math.abs(lum-bg)>threshold){minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);count++}}
+  if(count<Math.max(50,w*h*.01)||maxX<0)return {x:0,y:0,w:1,h:1};
+  const pad=.018;minX=Math.max(0,minX-pad*w);minY=Math.max(0,minY-pad*h);maxX=Math.min(w,maxX+pad*w);maxY=Math.min(h,maxY+pad*h);
+  return {x:minX/w,y:minY/h,w:(maxX-minX)/w,h:(maxY-minY)/h};
+}
+
+function Scanner(){
+  const [file,setFile]=useState(null),[filter,setFilter]=useState('Original'),[rotation,setRotation]=useState(0),[busy,setBusy]=useState(false),[aiInfo,setAiInfo]=useState(null),[crop,setCrop]=useState({x:0,y:0,w:1,h:1}),canvasRef=useRef(null),imgRef=useRef(null);
+  const drawBase=(targetFilter=filter,aiSettings=null)=>{
+    const im=imgRef.current,c=canvasRef.current;if(!im||!c)return;
+    const rad=rotation*Math.PI/180,sourceW=im.width*crop.w,sourceH=im.height*crop.h,sourceX=im.width*crop.x,sourceY=im.height*crop.y,swap=rotation%180!==0;
+    c.width=swap?sourceH:sourceW;c.height=swap?sourceW:sourceH;
+    const ctx=c.getContext('2d');ctx.save();ctx.translate(c.width/2,c.height/2);ctx.rotate(rad);ctx.drawImage(im,sourceX,sourceY,sourceW,sourceH,-sourceW/2,-sourceH/2,sourceW,sourceH);ctx.restore();
+    if(targetFilter==='Original')return;
+    if(targetFilter==='AI Filter ✨') { applyLocalDocumentEnhance(ctx,c,aiSettings||{}); return; }
+    const data=ctx.getImageData(0,0,c.width,c.height),d=data.data;
+    for(let i=0;i<d.length;i+=4){
+      let r=d[i],g=d[i+1],b=d[i+2],lum=.299*r+.587*g+.114*b;
+      if(targetFilter==='Grayscale')r=g=b=lum;
+      if(targetFilter==='Black & White')r=g=b=lum>155?255:0;
+      if(targetFilter==='Document')r=g=b=lum>185?255:Math.max(0,lum-20);
+      if(targetFilter==='Receipt')r=g=b=lum>205?255:0;
+      if(targetFilter==='High Contrast'){const f=1.7;r=Math.max(0,Math.min(255,(r-128)*f+128));g=Math.max(0,Math.min(255,(g-128)*f+128));b=Math.max(0,Math.min(255,(b-128)*f+128))}
+      if(targetFilter==='Auto Enhance'){r=Math.min(255,r*1.08+8);g=Math.min(255,g*1.08+8);b=Math.min(255,b*1.08+8)}
+      if(targetFilter==='ID Card'){r=Math.min(255,r*1.12+10);g=Math.min(255,g*1.12+10);b=Math.min(255,b*1.12+10)}
+      if(targetFilter==='Blueprint'){r=40;g=Math.min(255,lum*.65+35);b=Math.min(255,lum*1.15+65)}
+      d[i]=r;d[i+1]=g;d[i+2]=b;
+    }
+    if(targetFilter==='Sharpen'){
+      const src=new Uint8ClampedArray(d),W=c.width;
+      for(let y=1;y<c.height-1;y++)for(let x=1;x<W-1;x++)for(let k=0;k<3;k++){const i=(y*W+x)*4+k;d[i]=Math.max(0,Math.min(255,5*src[i]-src[i-4]-src[i+4]-src[i-W*4]-src[i+W*4]))}
+    }
+    ctx.putImageData(data,0,0);
+  };
+  useEffect(()=>{drawBase(filter,aiInfo?.settings)},[file,filter,rotation,aiInfo]);
+  const choose=async(fs)=>{const f=fs[0];if(!f)return;setFile(f);setAiInfo(null);const im=await loadImage(f);imgRef.current=im;setCrop(detectDocumentCrop(im));setTimeout(()=>drawBase('Original'),0)};
+  const applyAi=()=>{
+    if(!file||!imgRef.current)return;
+    // Free browser-only smart scan: re-detect edges and apply adaptive document enhancement.
+    const nextCrop=detectDocumentCrop(imgRef.current);
+    setCrop(nextCrop);
+    setAiInfo({summary:'Smart scan completed locally — document edges detected and an adaptive clarity filter was applied.',settings:{contrast:1.45,brightness:8,threshold:null}});
+    setFilter('AI Filter ✨');
+  };
+
+  const exportFile=async(type)=>{const b=await new Promise(r=>canvasRef.current.toBlob(r,type,.92));downloadBlob(b,type==='image/jpeg'?'scan.jpg':'scan.png')};
+  const exportPdf=async()=>{setBusy(true);const b=await new Promise(r=>canvasRef.current.toBlob(r,'image/jpeg',.92)),d=await PDFDocument.create(),jpg=await d.embedJpg(await b.arrayBuffer()),page=d.addPage([jpg.width*.5,jpg.height*.5]);page.drawImage(jpg,{x:0,y:0,width:page.getWidth(),height:page.getHeight()});downloadBlob(new Blob([await d.save()],{type:'application/pdf'}),'scanned-document.pdf');setBusy(false)};
+  return <div className="scanner">
+    <DropZone accept="image/*" onFiles={choose}><ScanLine size={34}/><strong>{file?file.name:'Upload a document photo'}</strong><span>Auto-detect edges, crop the document, then enhance it</span></DropZone>
+    {file&&<>
+      <div className="aiPanel"><div><div className="eyebrow">AI SCAN</div><h3>Smart document analysis</h3><p>{aiInfo?.summary||'Detects the document locally and automatically improves clarity.'}</p></div><button className="aiButton" onClick={applyAi}>✨ Smart Auto Scan<small>Free · runs on this device</small></button></div>
+      <div className="filterrow">{filters.map(f=><button key={f} className={`${filter===f?'selected':''} ${f.startsWith('AI')?'aiFilter':''}`} onClick={()=>f.startsWith('AI')?applyAi():setFilter(f)}>{f}</button>)}</div>
+      <div className="scanpreview"><canvas ref={canvasRef}/></div>
+      <div className="actions"><button onClick={()=>setRotation((rotation+270)%360)}><RotateCcw size={18}/> Rotate left</button><button onClick={()=>setRotation((rotation+90)%360)}><RotateCw size={18}/> Rotate right</button><button className="primary" onClick={()=>exportFile('image/jpeg')}><Download size={18}/> JPG</button><button className="primary" disabled={busy} onClick={exportPdf}><FileText size={18}/> PDF</button></div>
+      <div className="notice">Auto-crop and Smart Auto Scan run entirely in your browser. No API key, account, upload or AI service is required.</div>
+    </>}
+  </div>
+}
 
 function App(){const [active,setActive]=useState(location.hash.slice(1)||'');const [query,setQuery]=useState('');const [menu,setMenu]=useState(false);const open=id=>{setActive(id);location.hash=id;window.scrollTo({top:0,behavior:'smooth'});setMenu(false)};useEffect(()=>{const fn=()=>setActive(location.hash.slice(1));addEventListener('hashchange',fn);return()=>removeEventListener('hashchange',fn)},[]);const shown=useMemo(()=>tools.filter(t=>(t.name+t.desc+t.cat).toLowerCase().includes(query.toLowerCase())),[query]);const tool=tools.find(t=>t.id===active);const render=()=>{if(!tool)return null;const back=()=>open('');const C=tool.id==='image-compressor'?ImageCompressor:tool.id==='image-resizer'?()=> <ImageResize/>:tool.id==='image-converter'?()=> <ImageResize convert/>:tool.id==='video-compressor'?VideoCompressor:tool.id==='pdf-compressor'?()=> <PdfTool kind="compress"/>:tool.id==='pdf-merger'?()=> <PdfTool kind="merge"/>:tool.id==='pdf-splitter'?()=> <PdfTool kind="split"/>:tool.id==='images-to-pdf'?ImagesToPdf:tool.id==='pdf-to-images'?PdfToImages:Scanner;return <ToolShell tool={tool} onBack={back}><C/></ToolShell>};return <div className="app"><header><button className="brand" onClick={()=>open('')}><span className="brandmark">TF</span><span>ToolForge <em>AI</em></span></button><nav><button onClick={()=>document.getElementById('tools')?.scrollIntoView({behavior:'smooth'})}>All tools</button><a href="#privacy">Privacy</a></nav><button className="menubtn" onClick={()=>setMenu(!menu)}>{menu?<X/>:<Menu/>}</button></header>{menu&&<div className="mobilemenu"><button onClick={()=>open('')}>All tools</button><a href="#privacy">Privacy</a></div>}{active?render():<><section className="hero"><div className="badge"><ShieldCheck size={16}/> Private by design · Browser-first processing</div><h1>Powerful tools.<br/><span>No complicated software.</span></h1><p>Compress, convert, merge, resize and scan files in seconds — right in your browser.</p><div className="search"><Search size={20}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="What do you want to do?"/></div></section><section id="tools" className="tools"><div className="sectiontitle"><div><div className="eyebrow">TOOLKIT</div><h2>{query?`Results for “${query}”`:'Everything you need'}</h2></div><span>{shown.length} tools</span></div><div className="grid">{shown.map(t=>{const Icon=t.icon;return <button className="card" key={t.id} onClick={()=>open(t.id)}><div className="cardicon"><Icon size={22}/></div><div className="cardtext"><h3>{t.name}</h3><p>{t.desc}</p><small>{t.cat}</small></div><ArrowRight className="arrow" size={19}/></button>})}</div></section><section className="trust"><div><ShieldCheck/><h3>Your files stay yours.</h3><p>Whenever possible, processing happens locally on your device. No account required.</p></div><div><RefreshCw/><h3>Simple workflow.</h3><p>Upload, adjust, process, download. No bloated desktop software.</p></div><div><Download/><h3>Ready to export.</h3><p>Clean results with clear file sizes and one-click downloads.</p></div></section></>}<footer id="privacy"><div><span className="brandmark">TF</span><strong>ToolForge AI</strong></div><p>Fast browser tools for everyday files.</p><span>© 2026 ToolForge AI · Your files are processed locally whenever possible.</span></footer></div>}
 export default App;

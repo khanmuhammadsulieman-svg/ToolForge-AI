@@ -26,3 +26,8 @@ npm run build
 ```
 
 Deploy the project to Vercel or Cloudflare Pages as a Vite app. No database is required for the current version.
+
+
+## AI Scanner
+
+The document scanner uses browser-only smart detection and enhancement. No OpenAI API key or backend endpoint is required.
