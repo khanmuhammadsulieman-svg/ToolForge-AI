@@ -1,5 +1,5 @@
 import React,{useEffect,useMemo,useRef,useState} from 'react';
-import {Upload,Search,Image as ImageIcon,FileVideo,FileText,ScanLine,ArrowRight,Download,RefreshCw,ShieldCheck,Menu,X,ChevronLeft,RotateCcw,RotateCw,Plus,Trash2,Merge,Maximize2,FileOutput,Layers,CheckCircle2} from 'lucide-react';
+import {Upload,Search,Image as ImageIcon,FileVideo,FileText,ScanLine,ArrowRight,Download,RefreshCw,ShieldCheck,Menu,X,ChevronLeft,RotateCcw,RotateCw,Plus,Trash2,Merge,Maximize2,FileOutput,Layers,CheckCircle2,Sparkles} from 'lucide-react';
 import {PDFDocument} from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -10,7 +10,7 @@ const tools=[
 {id:'video-compressor',name:'Video Compressor',desc:'Reduce video size with browser-native encoding.',icon:FileVideo,cat:'Video'},
 {id:'pdf-compressor',name:'PDF Compressor',desc:'Optimize and re-save PDFs for smaller, cleaner files.',icon:FileText,cat:'PDF'},
 {id:'pdf-merger',name:'PDF Merger',desc:'Combine multiple PDFs and keep them in your chosen order.',icon:Merge,cat:'PDF'},
-{id:'scanner',name:'AI Document Scanner',desc:'Scan documents with camera or upload, then enhance with 10 filters.',icon:ScanLine,cat:'Scanner'},
+{id:'scanner',name:'AI Document Scanner',desc:'Scan documents with camera or upload, then enhance with realistic filters.',icon:ScanLine,cat:'Scanner'},
 {id:'image-resizer',name:'Image Resizer',desc:'Resize images by pixels or percentage without extra software.',icon:Maximize2,cat:'Images'},
 {id:'image-converter',name:'Image Converter',desc:'Convert images between JPG, PNG and WebP.',icon:FileOutput,cat:'Images'},
 {id:'pdf-to-images',name:'PDF → Images',desc:'Render PDF pages to downloadable PNG images.',icon:Layers,cat:'PDF'},
@@ -44,22 +44,61 @@ function ImagesToPdf(){const [files,setFiles]=useState([]),[busy,setBusy]=useSta
 
 function PdfToImages(){const [file,setFile]=useState(null),[busy,setBusy]=useState(false),[pages,setPages]=useState([]);const run=async()=>{setBusy(true);const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;const out=[];for(let i=1;i<=pdf.numPages;i++){const p=await pdf.getPage(i),vp=p.getViewport({scale:1.5}),c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;await p.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;const b=await new Promise(r=>c.toBlob(r,'image/png'));out.push({blob:b,name:`page-${i}.png`})}setPages(out);setBusy(false)};return <div className="stack"><DropZone accept="application/pdf" onFiles={fs=>setFile(fs[0])}><FileText size={34}/><strong>{file?file.name:'Drop a PDF here'}</strong><span>Each page is rendered locally to PNG</span></DropZone><button className="primary big" disabled={!file||busy} onClick={run}>{busy?'Rendering…':'Convert to images'}</button>{pages.length>0&&<div className="result"><h3>{pages.length} pages ready</h3><div className="actions"><button className="primary" onClick={()=>pages.forEach(p=>downloadBlob(p.blob,p.name))}><Download size={18}/> Download all</button></div></div>}</div>}
 
-const filters=['Original','Auto Enhance','Document','Black & White','Grayscale','High Contrast','Receipt','ID Card','Sharpen','Blueprint','AI Filter ✨'];
+// Realistic Flatbed Scanner Filter: removes shadows, whitens page & enhances text
+function applyRealisticScan(ctx, c) {
+  const imgData = ctx.getImageData(0, 0, c.width, c.height);
+  const d = imgData.data;
+  const w = c.width, h = c.height;
 
-function applyLocalDocumentEnhance(ctx,c,settings={}){
-  const data=ctx.getImageData(0,0,c.width,c.height),d=data.data;
-  const contrast=settings.contrast??1.35, brightness=settings.brightness??8, threshold=settings.threshold??null;
-  for(let i=0;i<d.length;i+=4){
-    let r=d[i],g=d[i+1],b=d[i+2],lum=.299*r+.587*g+.114*b;
-    if(threshold!==null) r=g=b=lum>threshold?255:0;
-    else {
-      r=Math.max(0,Math.min(255,(r-128)*contrast+128+brightness));
-      g=Math.max(0,Math.min(255,(g-128)*contrast+128+brightness));
-      b=Math.max(0,Math.min(255,(b-128)*contrast+128+brightness));
+  // Step 1: Compute block background illumination matrix
+  const blockSize = Math.max(16, Math.floor(Math.min(w, h) / 16));
+  const blocksX = Math.ceil(w / blockSize);
+  const blocksY = Math.ceil(h / blockSize);
+  const bgGrid = new Float32Array(blocksX * blocksY);
+
+  for (let by = 0; by < blocksY; by++) {
+    for (let bx = 0; bx < blocksX; bx++) {
+      let maxLum = 0;
+      const startX = bx * blockSize;
+      const startY = by * blockSize;
+      const endX = Math.min(w, startX + blockSize);
+      const endY = Math.min(h, startY + blockSize);
+
+      for (let y = startY; y < endY; y += 2) {
+        for (let x = startX; x < endX; x += 2) {
+          const idx = (y * w + x) * 4;
+          const lum = 0.299 * d[idx] + 0.587 * d[idx + 1] + 0.114 * d[idx + 2];
+          if (lum > maxLum) maxLum = lum;
+        }
+      }
+      bgGrid[by * blocksX + bx] = Math.max(80, maxLum);
     }
-    d[i]=r;d[i+1]=g;d[i+2]=b;
   }
-  ctx.putImageData(data,0,0);
+
+  // Step 2: Normalize pixel brightness by dividing by local paper background
+  for (let y = 0; y < h; y++) {
+    const by = Math.min(blocksY - 1, Math.floor(y / blockSize));
+    for (let x = 0; x < w; x++) {
+      const bx = Math.min(blocksX - 1, Math.floor(x / blockSize));
+      const localBg = bgGrid[by * blocksX + bx];
+      const i = (y * w + x) * 4;
+
+      for (let ch = 0; ch < 3; ch++) {
+        // Brightness correction against background lighting
+        let val = (d[i + ch] / localBg) * 255;
+        // High contrast S-curve to push paper to pure clean white and crisp ink
+        if (val > 215) {
+          val = 255;
+        } else if (val < 90) {
+          val = val * 0.75;
+        } else {
+          val = (val - 90) * (255 / 125);
+        }
+        d[i + ch] = Math.min(255, Math.max(0, val));
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
 }
 
 function detectDocumentCrop(im){
@@ -77,15 +116,28 @@ function detectDocumentCrop(im){
   return {x:minX/w,y:minY/h,w:(maxX-minX)/w,h:(maxY-minY)/h};
 }
 
+const filters=['Original','Realistic Scanner ✨','Auto Enhance','Document','Black & White','Grayscale','High Contrast','Receipt','ID Card','Sharpen','Blueprint'];
+
 function Scanner(){
   const [file,setFile]=useState(null),[filter,setFilter]=useState('Original'),[rotation,setRotation]=useState(0),[busy,setBusy]=useState(false),[aiInfo,setAiInfo]=useState(null),[crop,setCrop]=useState({x:0,y:0,w:1,h:1}),canvasRef=useRef(null),imgRef=useRef(null);
-  const drawBase=(targetFilter=filter,aiSettings=null)=>{
+  
+  // 10 free generations tracked locally (no API key needed)
+  const [credits, setCredits] = useState(() => {
+    const saved = localStorage.getItem('tf_realistic_scans');
+    return saved !== null ? parseInt(saved, 10) : 10;
+  });
+
+  const drawBase=(targetFilter=filter)=>{
     const im=imgRef.current,c=canvasRef.current;if(!im||!c)return;
     const rad=rotation*Math.PI/180,sourceW=im.width*crop.w,sourceH=im.height*crop.h,sourceX=im.width*crop.x,sourceY=im.height*crop.y,swap=rotation%180!==0;
     c.width=swap?sourceH:sourceW;c.height=swap?sourceW:sourceH;
     const ctx=c.getContext('2d');ctx.save();ctx.translate(c.width/2,c.height/2);ctx.rotate(rad);ctx.drawImage(im,sourceX,sourceY,sourceW,sourceH,-sourceW/2,-sourceH/2,sourceW,sourceH);ctx.restore();
+    
     if(targetFilter==='Original')return;
-    if(targetFilter==='AI Filter ✨') { applyLocalDocumentEnhance(ctx,c,aiSettings||{}); return; }
+    if(targetFilter==='Realistic Scanner ✨'){
+      applyRealisticScan(ctx,c);
+      return;
+    }
     const data=ctx.getImageData(0,0,c.width,c.height),d=data.data;
     for(let i=0;i<d.length;i+=4){
       let r=d[i],g=d[i+1],b=d[i+2],lum=.299*r+.587*g+.114*b;
@@ -94,8 +146,8 @@ function Scanner(){
       if(targetFilter==='Document')r=g=b=lum>185?255:Math.max(0,lum-20);
       if(targetFilter==='Receipt')r=g=b=lum>205?255:0;
       if(targetFilter==='High Contrast'){const f=1.7;r=Math.max(0,Math.min(255,(r-128)*f+128));g=Math.max(0,Math.min(255,(g-128)*f+128));b=Math.max(0,Math.min(255,(b-128)*f+128))}
-      if(targetFilter==='Auto Enhance'){r=Math.min(255,r*1.08+8);g=Math.min(255,g*1.08+8);b=Math.min(255,b*1.08+8)}
-      if(targetFilter==='ID Card'){r=Math.min(255,r*1.12+10);g=Math.min(255,g*1.12+10);b=Math.min(255,b*1.12+10)}
+      if(targetFilter==='Auto Enhance'){r=Math.min(255,r*1.08+8);g=Math.min(255,r*1.08+8);b=Math.min(255,b*1.08+8)}
+      if(targetFilter==='ID Card'){r=Math.min(255,r*1.12+10);g=Math.min(255,r*1.12+10);b=Math.min(255,b*1.12+10)}
       if(targetFilter==='Blueprint'){r=40;g=Math.min(255,lum*.65+35);b=Math.min(255,lum*1.15+65)}
       d[i]=r;d[i+1]=g;d[i+2]=b;
     }
@@ -105,28 +157,73 @@ function Scanner(){
     }
     ctx.putImageData(data,0,0);
   };
-  useEffect(()=>{drawBase(filter,aiInfo?.settings)},[file,filter,rotation,aiInfo]);
+
+  useEffect(()=>{drawBase(filter)},[file,filter,rotation,crop]);
   const choose=async(fs)=>{const f=fs[0];if(!f)return;setFile(f);setAiInfo(null);const im=await loadImage(f);imgRef.current=im;setCrop(detectDocumentCrop(im));setTimeout(()=>drawBase('Original'),0)};
-  const applyAi=()=>{
-    if(!file||!imgRef.current)return;
-    const nextCrop=detectDocumentCrop(imgRef.current);
-    setCrop(nextCrop);
-    setAiInfo({summary:'Smart scan completed locally — document edges detected and an adaptive clarity filter was applied.',settings:{contrast:1.45,brightness:8,threshold:null}});
-    setFilter('AI Filter ✨');
+
+  const applyRealisticScannerMode = () => {
+    if (!file || !imgRef.current) return;
+    if (credits <= 0) {
+      alert("You have used your 10 free scans on this device. Standard filters remain available!");
+      return;
+    }
+    setBusy(true);
+    setTimeout(() => {
+      const nextCrop = detectDocumentCrop(imgRef.current);
+      setCrop(nextCrop);
+      const remaining = credits - 1;
+      setCredits(remaining);
+      localStorage.setItem('tf_realistic_scans', remaining.toString());
+      setAiInfo({ summary: 'Shadow removal complete: background flattened to pure paper white and text contrast boosted.' });
+      setFilter('Realistic Scanner ✨');
+      setBusy(false);
+    }, 150);
   };
 
   const exportFile=async(type)=>{const b=await new Promise(r=>canvasRef.current.toBlob(r,type,.92));downloadBlob(b,type==='image/jpeg'?'scan.jpg':'scan.png')};
   const exportPdf=async()=>{setBusy(true);const b=await new Promise(r=>canvasRef.current.toBlob(r,'image/jpeg',.92)),d=await PDFDocument.create(),jpg=await d.embedJpg(await b.arrayBuffer()),page=d.addPage([jpg.width*.5,jpg.height*.5]);page.drawImage(jpg,{x:0,y:0,width:page.getWidth(),height:page.getHeight()});downloadBlob(new Blob([await d.save()],{type:'application/pdf'}),'scanned-document.pdf');setBusy(false)};
-  return <div className="scanner">
-    <DropZone accept="image/*" onFiles={choose}><ScanLine size={34}/><strong>{file?file.name:'Upload a document photo'}</strong><span>Auto-detect edges, crop the document, then enhance it</span></DropZone>
-    {file&&<>
-      <div className="aiPanel"><div><div className="eyebrow">AI SCAN</div><h3>Smart document analysis</h3><p>{aiInfo?.summary||'Detects the document locally and automatically improves clarity.'}</p></div><button className="aiButton" onClick={applyAi}>✨ Smart Auto Scan<small>Free · runs on this device</small></button></div>
-      <div className="filterrow">{filters.map(f=><button key={f} className={`${filter===f?'selected':''} ${f.startsWith('AI')?'aiFilter':''}`} onClick={()=>f.startsWith('AI')?applyAi():setFilter(f)}>{f}</button>)}</div>
-      <div className="scanpreview"><canvas ref={canvasRef}/></div>
-      <div className="actions"><button onClick={()=>setRotation((rotation+270)%360)}><RotateCcw size={18}/> Rotate left</button><button onClick={()=>setRotation((rotation+90)%360)}><RotateCw size={18}/> Rotate right</button><button className="primary" onClick={()=>exportFile('image/jpeg')}><Download size={18}/> JPG</button><button className="primary" disabled={busy} onClick={exportPdf}><FileText size={18}/> PDF</button></div>
-      <div className="notice">Auto-crop and Smart Auto Scan run entirely in your browser. No API key, account, upload or AI service is required.</div>
-    </>}
-  </div>
+
+  return (
+    <div className="scanner">
+      <DropZone accept="image/*" onFiles={choose}>
+        <ScanLine size={34}/>
+        <strong>{file?file.name:'Upload a document photo'}</strong>
+        <span>Auto-crop edges, eliminate shadows & restore crisp text</span>
+      </DropZone>
+      {file&&<>
+        <div className="aiPanel">
+          <div>
+            <div className="eyebrow" style={{display:'flex',alignItems:'center',gap:'4px'}}><Sparkles size={14}/> REALISTIC SCANNER</div>
+            <h3>Flatbed Scanner Restoration ({credits}/10 free scans left)</h3>
+            <p>{aiInfo?.summary||'Removes room shadows, cleans paper texture, and restores ink crispness like a flatbed scanner.'}</p>
+          </div>
+          <button className="aiButton" disabled={busy || credits <= 0} onClick={applyRealisticScannerMode}>
+            {busy ? 'Processing scan…' : '✨ Realistic Scan'}
+            <small>{credits > 0 ? `${credits} scans remaining` : 'Limit reached'}</small>
+          </button>
+        </div>
+        <div className="filterrow">
+          {filters.map(f=>(
+            <button 
+              key={f} 
+              className={`${filter===f?'selected':''} ${f.includes('Realistic')?'aiFilter':''}`} 
+              onClick={()=> f.includes('Realistic') ? applyRealisticScannerMode() : setFilter(f)}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+        <div className="scanpreview"><canvas ref={canvasRef}/></div>
+        <div className="actions">
+          <button onClick={()=>setRotation((rotation+270)%360)}><RotateCcw size={18}/> Rotate left</button>
+          <button onClick={()=>setRotation((rotation+90)%360)}><RotateCw size={18}/> Rotate right</button>
+          <button className="primary" onClick={()=>exportFile('image/jpeg')}><Download size={18}/> JPG</button>
+          <button className="primary" disabled={busy} onClick={exportPdf}><FileText size={18}/> PDF</button>
+        </div>
+        <div className="notice">Processing runs entirely on-device with zero server uploads or API requirements.</div>
+      </>}
+    </div>
+  );
 }
 
 function App(){
@@ -134,21 +231,21 @@ function App(){
   const [query,setQuery]=useState('');
   const [menu,setMenu]=useState(false);
   const open=id=>{setActive(id);location.hash=id;window.scrollTo({top:0,behavior:'smooth'});setMenu(false)};
-  
+
   useEffect(()=>{
     const fn=()=>setActive(location.hash.slice(1));
     addEventListener('hashchange',fn);
-    return()=>removeEventListener('hashchange',fn)
+    return()=>removeEventListener('hashchange',fn);
   },[]);
-  
+
   const shown=useMemo(()=>tools.filter(t=>(t.name+t.desc+t.cat).toLowerCase().includes(query.toLowerCase())),[query]);
   const tool=tools.find(t=>t.id===active);
-  
+
   const render=()=>{
     if(!tool)return null;
     const back=()=>open('');
     const C=tool.id==='image-compressor'?ImageCompressor:tool.id==='image-resizer'?()=> <ImageResize/>:tool.id==='image-converter'?()=> <ImageResize convert/>:tool.id==='video-compressor'?VideoCompressor:tool.id==='pdf-compressor'?()=> <PdfTool kind="compress"/>:tool.id==='pdf-merger'?()=> <PdfTool kind="merge"/>:tool.id==='pdf-splitter'?()=> <PdfTool kind="split"/>:tool.id==='images-to-pdf'?ImagesToPdf:tool.id==='pdf-to-images'?PdfToImages:Scanner;
-    return <ToolShell tool={tool} onBack={back}><C/></ToolShell>
+    return <ToolShell tool={tool} onBack={back}><C/></ToolShell>;
   };
 
   return (
