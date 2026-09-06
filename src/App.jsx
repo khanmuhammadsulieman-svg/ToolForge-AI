@@ -46,8 +46,6 @@ function PdfToImages(){const [file,setFile]=useState(null),[busy,setBusy]=useSta
 
 const filters=['Original','Auto Enhance','Document','Black & White','Grayscale','High Contrast','Receipt','ID Card','Sharpen','Blueprint','AI Filter ✨'];
 
-
-
 function applyLocalDocumentEnhance(ctx,c,settings={}){
   const data=ctx.getImageData(0,0,c.width,c.height),d=data.data;
   const contrast=settings.contrast??1.35, brightness=settings.brightness??8, threshold=settings.threshold??null;
@@ -111,7 +109,6 @@ function Scanner(){
   const choose=async(fs)=>{const f=fs[0];if(!f)return;setFile(f);setAiInfo(null);const im=await loadImage(f);imgRef.current=im;setCrop(detectDocumentCrop(im));setTimeout(()=>drawBase('Original'),0)};
   const applyAi=()=>{
     if(!file||!imgRef.current)return;
-    // Free browser-only smart scan: re-detect edges and apply adaptive document enhancement.
     const nextCrop=detectDocumentCrop(imgRef.current);
     setCrop(nextCrop);
     setAiInfo({summary:'Smart scan completed locally — document edges detected and an adaptive clarity filter was applied.',settings:{contrast:1.45,brightness:8,threshold:null}});
@@ -132,5 +129,110 @@ function Scanner(){
   </div>
 }
 
-function App(){const [active,setActive]=useState(location.hash.slice(1)||'');const [query,setQuery]=useState('');const [menu,setMenu]=useState(false);const open=id=>{setActive(id);location.hash=id;window.scrollTo({top:0,behavior:'smooth'});setMenu(false)};useEffect(()=>{const fn=()=>setActive(location.hash.slice(1));addEventListener('hashchange',fn);return()=>removeEventListener('hashchange',fn)},[]);const shown=useMemo(()=>tools.filter(t=>(t.name+t.desc+t.cat).toLowerCase().includes(query.toLowerCase())),[query]);const tool=tools.find(t=>t.id===active);const render=()=>{if(!tool)return null;const back=()=>open('');const C=tool.id==='image-compressor'?ImageCompressor:tool.id==='image-resizer'?()=> <ImageResize/>:tool.id==='image-converter'?()=> <ImageResize convert/>:tool.id==='video-compressor'?VideoCompressor:tool.id==='pdf-compressor'?()=> <PdfTool kind="compress"/>:tool.id==='pdf-merger'?()=> <PdfTool kind="merge"/>:tool.id==='pdf-splitter'?()=> <PdfTool kind="split"/>:tool.id==='images-to-pdf'?ImagesToPdf:tool.id==='pdf-to-images'?PdfToImages:Scanner;return <ToolShell tool={tool} onBack={back}><C/></ToolShell>};return <div className="app"><header><button className="brand" onClick={()=>open('')}><span className="brandmark">TF</span><span>ToolForge <em>AI</em></span></button><nav><button onClick={()=>document.getElementById('tools')?.scrollIntoView({behavior:'smooth'})}>All tools</button><a href="#privacy">Privacy</a></nav><button className="menubtn" onClick={()=>setMenu(!menu)}>{menu?<X/>:<Menu/>}</button></header>{menu&&<div className="mobilemenu"><button onClick={()=>open('')}>All tools</button><a href="#privacy">Privacy</a></div>}{active?render():<><section className="hero"><div className="badge"><ShieldCheck size={16}/> Private by design · Browser-first processing</div><h1>Powerful tools.<br/><span>No complicated software.</span></h1><p>Compress, convert, merge, resize and scan files in seconds — right in your browser.</p><div className="search"><Search size={20}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="What do you want to do?"/></div></section><section id="tools" className="tools"><div className="sectiontitle"><div><div className="eyebrow">TOOLKIT</div><h2>{query?`Results for “${query}”`:'Everything you need'}</h2></div><span>{shown.length} tools</span></div><div className="grid">{shown.map(t=>{const Icon=t.icon;return <button className="card" key={t.id} onClick={()=>open(t.id)}><div className="cardicon"><Icon size={22}/></div><div className="cardtext"><h3>{t.name}</h3><p>{t.desc}</p><small>{t.cat}</small></div><ArrowRight className="arrow" size={19}/></button>})}</div></section><section className="trust"><div><ShieldCheck/><h3>Your files stay yours.</h3><p>Whenever possible, processing happens locally on your device. No account required.</p></div><div><RefreshCw/><h3>Simple workflow.</h3><p>Upload, adjust, process, download. No bloated desktop software.</p></div><div><Download/><h3>Ready to export.</h3><p>Clean results with clear file sizes and one-click downloads.</p></div></section></>}<footer id="privacy"><div><span className="brandmark">TF</span><strong>ToolForge AI</strong></div><p>Fast browser tools for everyday files.</p><span>© 2026 ToolForge AI · Your files are processed locally whenever possible.</span></footer></div>}
+function App(){
+  const [active,setActive]=useState(location.hash.slice(1)||'');
+  const [query,setQuery]=useState('');
+  const [menu,setMenu]=useState(false);
+  const open=id=>{setActive(id);location.hash=id;window.scrollTo({top:0,behavior:'smooth'});setMenu(false)};
+  
+  useEffect(()=>{
+    const fn=()=>setActive(location.hash.slice(1));
+    addEventListener('hashchange',fn);
+    return()=>removeEventListener('hashchange',fn)
+  },[]);
+  
+  const shown=useMemo(()=>tools.filter(t=>(t.name+t.desc+t.cat).toLowerCase().includes(query.toLowerCase())),[query]);
+  const tool=tools.find(t=>t.id===active);
+  
+  const render=()=>{
+    if(!tool)return null;
+    const back=()=>open('');
+    const C=tool.id==='image-compressor'?ImageCompressor:tool.id==='image-resizer'?()=> <ImageResize/>:tool.id==='image-converter'?()=> <ImageResize convert/>:tool.id==='video-compressor'?VideoCompressor:tool.id==='pdf-compressor'?()=> <PdfTool kind="compress"/>:tool.id==='pdf-merger'?()=> <PdfTool kind="merge"/>:tool.id==='pdf-splitter'?()=> <PdfTool kind="split"/>:tool.id==='images-to-pdf'?ImagesToPdf:tool.id==='pdf-to-images'?PdfToImages:Scanner;
+    return <ToolShell tool={tool} onBack={back}><C/></ToolShell>
+  };
+
+  return (
+    <div className="app">
+      <header>
+        <button className="brand" onClick={()=>open('')}>
+          <span className="brandmark">TF</span>
+          <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+            <span>ToolForge <em>AI</em></span>
+            <span style={{
+              fontSize: '0.72rem',
+              fontWeight: 500,
+              padding: '2px 8px',
+              borderRadius: '9999px',
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              color: '#9ca3af'
+            }}>
+              by Sulieman Khan
+            </span>
+          </div>
+        </button>
+        <nav>
+          <button onClick={()=>document.getElementById('tools')?.scrollIntoView({behavior:'smooth'})}>All tools</button>
+          <a href="#privacy">Privacy</a>
+        </nav>
+        <button className="menubtn" onClick={()=>setMenu(!menu)}>{menu?<X/>:<Menu/>}</button>
+      </header>
+
+      {menu&&<div className="mobilemenu"><button onClick={()=>open('')}>All tools</button><a href="#privacy">Privacy</a></div>}
+
+      {active ? render() : (
+        <>
+          <section className="hero">
+            <div className="badge"><ShieldCheck size={16}/> Private by design · Browser-first processing</div>
+            <h1>Powerful tools.<br/><span>No complicated software.</span></h1>
+            <p>Compress, convert, merge, resize and scan files in seconds — right in your browser.</p>
+            <div style={{fontSize: '0.9rem', color: '#9ca3af', marginTop: '-12px', marginBottom: '16px'}}>
+              Created with ❤️ by <strong style={{color: '#ffffff'}}>Muhammad Sulieman Khan</strong>
+            </div>
+            <div className="search"><Search size={20}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="What do you want to do?"/></div>
+          </section>
+
+          <section id="tools" className="tools">
+            <div className="sectiontitle">
+              <div><div className="eyebrow">TOOLKIT</div><h2>{query?`Results for “${query}”`:'Everything you need'}</h2></div>
+              <span>{shown.length} tools</span>
+            </div>
+            <div className="grid">
+              {shown.map(t=>{
+                const Icon=t.icon;
+                return (
+                  <button className="card" key={t.id} onClick={()=>open(t.id)}>
+                    <div className="cardicon"><Icon size={22}/></div>
+                    <div className="cardtext">
+                      <h3>{t.name}</h3>
+                      <p>{t.desc}</p>
+                      <small>{t.cat}</small>
+                    </div>
+                    <ArrowRight className="arrow" size={19}/>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="trust">
+            <div><ShieldCheck/><h3>Your files stay yours.</h3><p>Whenever possible, processing happens locally on your device. No account required.</p></div>
+            <div><RefreshCw/><h3>Simple workflow.</h3><p>Upload, adjust, process, download. No bloated desktop software.</p></div>
+            <div><Download/><h3>Ready to export.</h3><p>Clean results with clear file sizes and one-click downloads.</p></div>
+          </section>
+        </>
+      )}
+
+      <footer id="privacy">
+        <div>
+          <span className="brandmark">TF</span>
+          <strong>ToolForge AI</strong>
+        </div>
+        <p>Fast browser tools for everyday files.</p>
+        <span>© 2026 ToolForge AI · Created by Muhammad Sulieman Khan · Your files are processed locally whenever possible.</span>
+      </footer>
+    </div>
+  );
+}
+
 export default App;
